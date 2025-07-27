@@ -70,27 +70,38 @@ class RandomShogi {
 	   return implode(' ', $res);	
 	}
 
-	function suggest($depth=1) {
+	function suggest($depth=1, &$list=null, $alpha=-1000000, $beta=1000000) {
 		$ml = $this->moveList();
-		if ($depth == 1)
-			shuffle($ml);
-		$mul = 1 - 2 * $this->side;
-		$best = -1000000;
-		$bestMove = [];
+		$best = 1000000 * ($this->side*2 - 1);
 		foreach ($ml as $move) {
 			$this->makeMove($move);
 			$val = $this->assess;
-			if ($depth < $this->maxDepth) {
-				list($m, $val) = $this->suggest($depth+1);
-			}
+			if ($depth < $this->maxDepth)
+			    $val = $this->suggest($depth+1, alpha:$alpha, beta:$beta);
 			$this->takeBack($move);
-			$val *= $mul;
-			if ($val > $best) {
-				$best = $val;
-				$bestMove = $move;
+			if ($this->side) {
+				if ($val <= $best) {
+					$best = $val;
+					if ($list !== null)
+						$list[] = [$move, $val];
+					if ($best <= $alpha)
+						$break;
+					if ($best < $beta)
+						$beta = $best;
+				}
+			} else {
+			    if ($val >= $best) {
+				    $best = $val;
+				    if ($list !== null)
+					    $list[] = [$move, $val];
+					if ($best >= $beta)
+						break;
+					if ($best > $alpha)
+						$alpha = $best;
+				}
 			}
 		}
-		return [$bestMove, $best * $mul];
+		return $best;
 	}
 
 	function makeMove($move) {
@@ -106,7 +117,7 @@ class RandomShogi {
 			}
 			$this->field[$r1][$c1] = $piece;
 			if ($taken != '-') {
-				$this->assess += self::$pieceValues[$taken];
+				$this->assess += self::$pieceValues[$taken] * 2;
 				if (($prom = (self::$promBonus[$taken]??0))) {
 					$this->assess -= $prom;
 					$taken = $this->side ? 'p' : 'P';
@@ -135,7 +146,7 @@ class RandomShogi {
 				$this->assess -= self::$pieceValues[$piece];
 			}
 			if ($t != '-') {
-				$this->assess -= self::$pieceValues[$t] - (self::$promBonus[$t] ?? 0);
+				$this->assess -= self::$pieceValues[$t] * 2 - (self::$promBonus[$t] ?? 0);
 				if ($t == 'T')
 					$tt = 'p';
 				elseif ($t == 't')
@@ -267,6 +278,7 @@ class RandomShogi {
 	static $promBonus = [];
 
 	static function staticInit() {
+		if (self::$genPatterns) return;
 		self::$genPatterns = [
 			'K' => 0b11111111, 'k' => 0b11111111,
 			'G' => 0b11111010, 'g' => 0b01011111,
@@ -298,17 +310,29 @@ class RandomShogi {
 
 }
 
-$seed = $argv[1] ?? (time() % 1000000);
+$opts = [];
+foreach ($argv as $arg) {
+	$parts = explode('=', $arg, 2);
+	if (count($parts) == 2)
+	    $opts[$parts[0]] = $parts[1];
+}
+
+$seed = $opts['seed'] ?? (time() % 1000000);
 echo "Seed: $seed\n";
 srand($seed);
-$game = new \RandomShogi(6, 6, $argv[2]??null);
-$game->maxDepth = 4;
+$game = new \RandomShogi(6, 6, $opts['pos']??null);
+$game->maxDepth = $opts['depth'] ?? 2;
 $hist = [];
 while (1) {
 	echo " ===========\n" . $game->boardToString() . "\n";
 	$ml = $game->moveList();
-	list($move, $val) = $game->suggest();
-	echo "({$game->assess}) My move: " . implode(' ', $move) . " -> $val\n";
+	$t0 = microtime(true);
+	$suggested = [];
+	$val = $game->suggest(list: $suggested);
+	$dt = number_format(microtime(true) - $t0, 3);
+	for ($upper = count($suggested) - 1; $suggested[$upper-1][1] == $suggested[$upper]; $upper--);
+	$move = $suggested[rand($upper, count($suggested)-1)][0];
+	echo "({$game->assess}) My move: " . implode(' ', $move) . " -> $val ({$dt}s)\n";
 	$game->makeMove($move);
 	$hist[] = $move;
 	echo " ***********\n" . $game->boardToString() . "\n";
