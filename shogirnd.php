@@ -72,12 +72,25 @@ class RandomShogi {
 
 	function suggest($depth=1, &$list=null, $alpha=-1000000, $beta=1000000) {
 		$ml = $this->moveList();
+		$lt = 0;
+		$rt = count($ml) - 1;
+		while ($lt < $rt) {
+			if ($ml[$lt][4] != '-')
+				$lt++;
+			elseif ($ml[$rt][4] == '-')
+				$rt--;
+			else {
+				$t = $ml[$lt];
+				$ml[$lt] = $ml[$rt];
+				$ml[$rt] = $t;
+			}
+		}
 		$best = 1000000 * ($this->side*2 - 1);
 		foreach ($ml as $move) {
 			$this->makeMove($move);
 			$val = $this->assess;
 			if ($depth < $this->maxDepth)
-			    $val = $this->suggest($depth+1, alpha:$alpha, beta:$beta);
+				$val = $this->suggest($depth+1, alpha:$alpha, beta:$beta);
 			$this->takeBack($move);
 			if ($this->side) {
 				if ($val <= $best) {
@@ -330,7 +343,7 @@ while (1) {
 	$suggested = [];
 	$val = $game->suggest(list: $suggested);
 	$dt = number_format(microtime(true) - $t0, 3);
-	for ($upper = count($suggested) - 1; $suggested[$upper-1][1] == $suggested[$upper]; $upper--);
+	for ($upper = count($suggested) - 1; $upper > 0 && $suggested[$upper-1][1] == $suggested[$upper]; $upper--);
 	$move = $suggested[rand($upper, count($suggested)-1)][0];
 	echo "({$game->assess}) My move: " . implode(' ', $move) . " -> $val ({$dt}s)\n";
 	$game->makeMove($move);
