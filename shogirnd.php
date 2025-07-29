@@ -4,18 +4,19 @@ define("PIECES", "PXYRCVHSGK");
 
 class RandomShogi {
 
-	function __construct($cols, $rows, $position=null) {
+	function __construct($cols=6, $rows=6, $position=null) {
 		self::staticInit();
-		$this->cols = $cols;
-		$this->rows = $rows;
 		$this->maxDepth = 1;
-		$this->side = 0;
-		$this->assess = 0;
-		$this->mkField($cols, $rows);
 		if ($position)
-			$this->mkSetup($position);
-		else
+			$this->mkSfenSetup($position);
+		else {
+			$this->cols = $cols;
+			$this->rows = $rows;
+			$this->mkField($cols, $rows);
 			$this->mkRndSetup();
+			$this->side = 0;
+		}
+		$this->assess = $this->assessPos();
 	}
 
 	function mkField($cols, $rows) {
@@ -45,11 +46,36 @@ class RandomShogi {
 		}
 	}
 
-	function mkSetup($pos) {
-		$pos = explode('/', $pos);
+	function mkSfenSetup($sfen) {
+		$parts = explode(' ', $sfen);
+		$board = str_replace(['+P', '+p'], ['T', 't'], $parts[0]);
+		for ($i = 1; $i <= 9; $i++) {
+			$board = str_replace("$i", str_repeat('-', $i), $board);
+		}
+		$pos = explode('/', $board);
+		$this->rows = count($pos);
+		$this->cols = strlen($pos[0]);
+		$this->mkField($this->cols, $this->rows);
 		for ($i = $this->rows; $i > 0; $i--)
 			for ($j = 1; $j <= $this->cols; $j++)
 				$this->field[$i][$j] = $pos[$this->rows - $i][$j-1];
+		$this->side = $parts[1] == 'w' ? 1 : 0;
+		foreach (str_split($parts[2]??'', 1) as $piece) {
+			$side = $piece > 'Z' ? 1 : 0;
+			@$this->pocket[$side][$piece] += 1;
+			$this->pocketCnt[$side] += 1;
+		}
+	}
+
+	function assessPos() {
+		$res = 0;
+		for ($i = 1; $i <= $this->rows; $i++)
+			for ($j = 1; $j <= $this->cols; $j++)
+				$res -= self::$pieceValues[$this->field[$i][$j]]??0;
+		foreach ($this->pocket as $pkt)
+			foreach ($pkt as $piece => $count)
+				$res -= self::$pieceValues[$piece] * $count;
+		return $res;
 	}
 
 	function boardToString() {
@@ -67,10 +93,26 @@ class RandomShogi {
 		foreach ($this->pocket[$side] as $piece => $count)
 			if ($count)
 				$res[] = "$piece*$count";
-	   return implode(' ', $res);	
+		return implode(' ', $res);	
+	}
+
+	function boardToSfen() {
+		$board = array_map(fn($row) => implode('', $row), array_slice($this->field, 1, $this->rows));
+		$board = implode('/', array_reverse($board));
+		for ($i = 9; $i > 0; $i--)
+			$board = str_replace(str_repeat('-', $i), "$i", $board);
+		$board = str_replace(['T', 't'], ['+P', '+p'], $board);
+		$side = $this->side ? 'w' : 'b';
+		$pocket = '';
+		foreach ($this->pocket as $pkt)
+			foreach ($pkt as $piece => $cnt)
+				$pocket .= str_repeat($piece, $cnt);
+		return "$board $side $pocket";
 	}
 
 	function suggest($depth=1, &$list=null, $alpha=-1000000, $beta=1000000) {
+		if ($depth == 1)
+			$this->prevAssess = $this->assess;
 		$ml = $this->moveList();
 		$lt = 0;
 		$rt = count($ml) - 1;
@@ -85,11 +127,16 @@ class RandomShogi {
 				$ml[$rt] = $t;
 			}
 		}
-		$best = 1000000 * ($this->side*2 - 1);
+		$mul = 1 - $this->side * 2;
+		$best = -1000000 * $mul;
 		foreach ($ml as $move) {
+			if ($depth < 3) {
+				echo str_repeat('>>', $depth) . '   ' . implode(' ', $move), " ($alpha $beta)\n";
+			}
 			$this->makeMove($move);
 			$val = $this->assess;
-			if ($depth < $this->maxDepth)
+			$end = stristr($move[4], 'K') !== false;
+			if ($depth < $this->maxDepth && !$end/* && ($val - $this->prevAssess) * $mul < self::$cutoffPoints*/)
 				$val = $this->suggest($depth+1, alpha:$alpha, beta:$beta);
 			$this->takeBack($move);
 			if ($this->side) {
@@ -97,21 +144,28 @@ class RandomShogi {
 					$best = $val;
 					if ($list !== null)
 						$list[] = [$move, $val];
-					if ($best <= $alpha)
+					if ($best <= $alpha) {
+						if ($depth < 3) echo str_repeat('>>', $depth) . "   alpha-break\n";
 						$break;
+					}
 					if ($best < $beta)
 						$beta = $best;
 				}
 			} else {
-			    if ($val >= $best) {
-				    $best = $val;
-				    if ($list !== null)
-					    $list[] = [$move, $val];
-					if ($best >= $beta)
+				if ($val >= $best) {
+					$best = $val;
+					if ($list !== null)
+						$list[] = [$move, $val];
+					if ($best >= $beta) {
+						if ($depth < 3) echo str_repeat('>>', $depth) . "   beta-break\n";
 						break;
+					}
 					if ($best > $alpha)
 						$alpha = $best;
 				}
+			}
+			if ($depth < 3) {
+				echo str_repeat('>>', $depth) . '   ' . implode(' ', $move), " -> $val $best $alpha $beta\n";
 			}
 		}
 		return $best;
@@ -135,7 +189,7 @@ class RandomShogi {
 					$this->assess -= $prom;
 					$taken = $this->side ? 'p' : 'P';
 				} else
-				    $taken = chr(ord($taken) ^ 0x20);
+					$taken = chr(ord($taken) ^ 0x20);
 				@$this->pocket[$this->side][$taken] += 1;
 				$this->pocketCnt[$this->side] += 1;
 			}
@@ -182,10 +236,10 @@ class RandomShogi {
 		$moves = [];
 		for ($i = 1; $i <= $this->rows; $i++)
 			for ($j = 1; $j <= $this->cols; $j++)
-		   	    if ($this->mask[$i][$j] == 'o')
-                    $this->addMoves($moves, $i, $j);
+				if ($this->mask[$i][$j] == 'o')
+					$this->addMoves($moves, $i, $j);
 		if ($this->pocketCnt[$this->side]) {
-	        $pkt = [];
+			$pkt = [];
 			foreach ($this->pocket[$this->side] as $p => $c)
 				if ($c)
 					$pkt[] = $p;
@@ -267,7 +321,7 @@ class RandomShogi {
 
 	function pawnMoves(&$moves, $r, $c, $dir) {
 		$r1 = $r + $dir;
-        $m = $this->mask[$r1][$c];
+		$m = $this->mask[$r1][$c];
 		if ($m == '-' || $m == 'e') {
 			$prom = ($r1 == 1 || $r1 == $this->rows) ? '^' : '';
 			$moves[] = [$r, $c, $r1, $c, $prom . $this->field[$r1][$c]];
@@ -289,6 +343,7 @@ class RandomShogi {
 	static $genPatterns = [];
 	static $pieceValues = [];
 	static $promBonus = [];
+	static $cutoffPoints = 20;
 
 	static function staticInit() {
 		if (self::$genPatterns) return;
@@ -316,64 +371,9 @@ class RandomShogi {
 			't' => 1,
 		];
 		$ltrs = array_keys(self::$pieceValues);
-        foreach ($ltrs as $ltr)
+		foreach ($ltrs as $ltr)
 			self::$pieceValues[strtoupper($ltr)] = -self::$pieceValues[$ltr];
 		self::$promBonus = ['T' => 4, 't' => -4];
 	}
 
-}
-
-$opts = [];
-foreach ($argv as $arg) {
-	$parts = explode('=', $arg, 2);
-	if (count($parts) == 2)
-	    $opts[$parts[0]] = $parts[1];
-}
-
-$seed = $opts['seed'] ?? (time() % 1000000);
-echo "Seed: $seed\n";
-srand($seed);
-$game = new \RandomShogi(6, 6, $opts['pos']??null);
-$game->maxDepth = $opts['depth'] ?? 2;
-$hist = [];
-while (1) {
-	echo " ===========\n" . $game->boardToString() . "\n";
-	$ml = $game->moveList();
-	$t0 = microtime(true);
-	$suggested = [];
-	$val = $game->suggest(list: $suggested);
-	$dt = number_format(microtime(true) - $t0, 3);
-	for ($upper = count($suggested) - 1; $upper > 0 && $suggested[$upper-1][1] == $suggested[$upper]; $upper--);
-	$move = $suggested[rand($upper, count($suggested)-1)][0];
-	echo "({$game->assess}) My move: " . implode(' ', $move) . " -> $val ({$dt}s)\n";
-	$game->makeMove($move);
-	$hist[] = $move;
-	echo " ***********\n" . $game->boardToString() . "\n";
-	$ml = $game->moveList();
-	while (1) {
-		echo "({$game->assess}) Your move: ";
-		$move = explode(' ', trim(fgets(STDIN)));
-		if ($move[0] == 'list') {
-			echo implode("\n", array_map(fn($x) => implode(' ', $x), $game->moveList())) . "\n";
-			continue;
-		}
-		if ($move[0] == 'back') {
-			echo "Takeback!\n";
-			$game->takeBack(array_pop($hist));
-			$game->takeBack(array_pop($hist));
-			$ml = $game->moveList();
-			echo $game->boardToString() . "\n";
-			continue;
-		}
-		foreach ($ml as $m) {
-			$ok = 0;
-			for ($i = 0; $i < 4; $i++)
-				$ok += ($move[$i] == $m[$i]) ? 1 : 0;
-			if ($ok == 4)
-				break 2;
-		}
-		echo "Incorrect, let's retry!\n";
-	}
-	$game->makeMove($m);
-	$hist[] = $m;
 }
