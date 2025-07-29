@@ -61,6 +61,7 @@ class RandomShogi {
 				$this->field[$i][$j] = $pos[$this->rows - $i][$j-1];
 		$this->side = $parts[1] == 'w' ? 1 : 0;
 		foreach (str_split($parts[2]??'', 1) as $piece) {
+			if (!$piece) continue;
 			$side = $piece > 'Z' ? 1 : 0;
 			@$this->pocket[$side][$piece] += 1;
 			$this->pocketCnt[$side] += 1;
@@ -130,9 +131,6 @@ class RandomShogi {
 		$mul = 1 - $this->side * 2;
 		$best = -1000000 * $mul;
 		foreach ($ml as $move) {
-			if ($depth < 3) {
-				echo str_repeat('>>', $depth) . '   ' . implode(' ', $move), " ($alpha $beta)\n";
-			}
 			$this->makeMove($move);
 			$val = $this->assess;
 			$end = stristr($move[4], 'K') !== false;
@@ -144,10 +142,8 @@ class RandomShogi {
 					$best = $val;
 					if ($list !== null)
 						$list[] = [$move, $val];
-					if ($best <= $alpha) {
-						if ($depth < 3) echo str_repeat('>>', $depth) . "   alpha-break\n";
+					if ($best < $alpha)
 						$break;
-					}
 					if ($best < $beta)
 						$beta = $best;
 				}
@@ -156,16 +152,11 @@ class RandomShogi {
 					$best = $val;
 					if ($list !== null)
 						$list[] = [$move, $val];
-					if ($best >= $beta) {
-						if ($depth < 3) echo str_repeat('>>', $depth) . "   beta-break\n";
+					if ($best > $beta)
 						break;
-					}
 					if ($best > $alpha)
 						$alpha = $best;
 				}
-			}
-			if ($depth < 3) {
-				echo str_repeat('>>', $depth) . '   ' . implode(' ', $move), " -> $val $best $alpha $beta\n";
 			}
 		}
 		return $best;
