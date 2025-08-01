@@ -59,7 +59,7 @@ class RandomShogi {
 		for ($i = $this->rows; $i > 0; $i--)
 			for ($j = 1; $j <= $this->cols; $j++)
 				$this->field[$i][$j] = $pos[$this->rows - $i][$j-1];
-		$this->side = $parts[1] == 'w' ? 1 : 0;
+		$this->side = ($parts[1]??'b') == 'w' ? 1 : 0;
 		foreach (str_split($parts[2]??'', 1) as $piece) {
 			if (!$piece) continue;
 			$side = $piece > 'Z' ? 1 : 0;
@@ -111,47 +111,68 @@ class RandomShogi {
 		return "$board $side $pocket";
 	}
 
-	function suggest($depth=1, &$list=null, $alpha=-1000000, $beta=1000000) {
-		if ($depth == 1)
-			$this->prevAssess = $this->assess;
-		$ml = $this->moveList();
-		$lt = 0;
-		$rt = count($ml) - 1;
-		while ($lt < $rt) {
-			if ($ml[$lt][4] != '-')
-				$lt++;
-			elseif ($ml[$rt][4] == '-')
-				$rt--;
-			else {
-				$t = $ml[$lt];
-				$ml[$lt] = $ml[$rt];
-				$ml[$rt] = $t;
+	function suggestWithTimeout($millis) {
+		$this->maxDepth = 2;
+		$this->searchNodes = 0;
+		$this->deadline = microtime(true) + $millis / 1000;
+		$results = $this->suggest();
+		$depths = [];
+		while (microtime(true) < $this->deadline) {
+			$this->maxDepth++;
+		    $this->searchNodes = 0;
+			$resultsNew = $this->suggest()??[];
+			for ($i = 0; $i < count($resultsNew); $i++) {
+				$results[$i] = $resultsNew[$i];
+				$depths[$i] = $this->maxDepth;
 			}
 		}
+		$max = $results[0][1];
+		$mul = 1 - 2 * $this->side;
+		for ($i = 2; $i < count($results); $i++)
+			if ($results[$i][1] * $mul > $max * $mul)
+				$max = $results[$i][1];
+		$filtered = [];
+		foreach ($results as $res)
+			if ($res[1] == $max)
+				$filtered[] = $res;
+		return $filtered;
+	}
+
+	function suggest($depth=1, $alpha=-1000000, $beta=1000000) {
+		if ($this->searchNodes % 1000 == 999 && microtime(true) > $this->deadline)
+			return NAN;
+		$this->searchNodes++;
+		$result = null;
+		$ml = $this->moveList(true);
 		$mul = 1 - $this->side * 2;
 		$best = -1000000 * $mul;
 		foreach ($ml as $move) {
 			$this->makeMove($move);
 			$val = $this->assess;
-			$end = stristr($move[4], 'K') !== false;
-			if ($depth < $this->maxDepth && !$end/* && ($val - $this->prevAssess) * $mul < self::$cutoffPoints*/)
-				$val = $this->suggest($depth+1, alpha:$alpha, beta:$beta);
+			$checkmate = stristr($move[4], 'K') !== false;
+			if ($depth < $this->maxDepth && !$checkmate)
+				$val = $this->suggest($depth+1, $alpha, $beta);
 			$this->takeBack($move);
+			if (is_nan($val)) {
+				if ($depth > 1)
+					return $val;
+				else {
+					break;
+				}
+			}
+			if ($depth == 1)
+				$result[] = [$move, $val];
 			if ($this->side) {
-				if ($val <= $best) {
+				if ($val < $best) {
 					$best = $val;
-					if ($list !== null)
-						$list[] = [$move, $val];
 					if ($best < $alpha)
 						$break;
 					if ($best < $beta)
 						$beta = $best;
 				}
 			} else {
-				if ($val >= $best) {
+				if ($val > $best) {
 					$best = $val;
-					if ($list !== null)
-						$list[] = [$move, $val];
 					if ($best > $beta)
 						break;
 					if ($best > $alpha)
@@ -159,7 +180,7 @@ class RandomShogi {
 				}
 			}
 		}
-		return $best;
+		return $depth == 1 ? $result : $best;
 	}
 
 	function makeMove($move) {
@@ -222,7 +243,7 @@ class RandomShogi {
 		$this->field[$r1][$c1] = $t;
 	}
 
-	function moveList() {
+	function moveList($strongMovesFirst=false) {
 		$this->fillMask($this->side);
 		$moves = [];
 		for ($i = 1; $i <= $this->rows; $i++)
@@ -239,6 +260,21 @@ class RandomShogi {
 					if ($this->field[$i][$j] == '-')
 						foreach ($pkt as $p)
 							$moves[] = ['!', $p, $i, $j, '-'];
+		}
+		if ($strongMovesFirst) {
+			$lt = 0;
+			$rt = count($moves) - 1;
+			while ($lt < $rt) {
+				if ($moves[$lt][4] != '-')
+					$lt++;
+				elseif ($moves[$rt][4] == '-')
+					$rt--;
+				else {
+					$t = $moves[$lt];
+					$moves[$lt] = $moves[$rt];
+					$moves[$rt] = $t;
+				}
+			}
 		}
 		return $moves;
 	}
@@ -334,7 +370,6 @@ class RandomShogi {
 	static $genPatterns = [];
 	static $pieceValues = [];
 	static $promBonus = [];
-	static $cutoffPoints = 20;
 
 	static function staticInit() {
 		if (self::$genPatterns) return;
