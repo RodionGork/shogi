@@ -16,13 +16,10 @@ $game = new \RandomShogi(6, 6, $opts['pos']??null);
 $hist = [];
 while (1) {
 	echo " ===========\n" . $game->boardToString() . "\n";
-	$ml = $game->moveList();
 	$t0 = microtime(true);
 	$suggested = $game->suggestWithTimeout(5000);
 	$dt = number_format(microtime(true) - $t0, 3);
-	for ($upper = count($suggested) - 1; $upper > 0 && $suggested[$upper-1][1] == $suggested[$upper][1]; $upper--);
-	//echo implode("\n", array_map(fn($m) => implode(',', $m[0]) . " -> $m[1]", $suggested)) . "\n$upper\n";
-	list($move, $val) = $suggested[rand($upper, count($suggested)-1)];
+	list($move, $val) = $suggested[array_rand($suggested)];
 	echo "({$game->assess}) My move: " . implode(' ', $move) . " -> $val ({$dt}s)\n";
 	$game->makeMove($move);
 	$hist[] = $move;

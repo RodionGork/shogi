@@ -9,21 +9,26 @@ echo "Seed: $seed\n";
 srand($seed);
 
 $input = $argv[1] ?? fgets(STDIN);
+if (trim($input) == 'init') {
+	$game = new \RandomShogi(6, 6);
+	echo $game->boardToSfen() . "\n";
+	exit(0);
+}
+
 $game = new \RandomShogi(position: trim($input));
 
-$depth = getenv('shogi_depth');
-$game->maxDepth = $depth ? $depth : 4;
+$mdd = getenv('shogi_drop_depth');
+$game->maxDepthDrop = $mdd ? $mdd : 20;
 
 $suggested = [];
 $t0 = microtime(true);
-$val = $game->suggest(list: $suggested);
+$suggested = $game->suggestWithTimeout(5000);
 $dt = number_format(microtime(true) - $t0, 3);
 
 if (getenv('shogi_list_moves'))
 	foreach ($suggested as $variant)
 		echo implode(',', $variant[0]) . " -> {$variant[1]}\n";
-for ($upper = count($suggested) - 1; $upper > 0 && $suggested[$upper-1][1] == $suggested[$upper][1]; $upper--);
-$move = $suggested[rand($upper, count($suggested)-1)][0];
+$move = $suggested[array_rand($suggested)][0];
 
 echo "curval: {$game->assess}\n";
 echo "move: " . implode(' ', $move) . "\n";

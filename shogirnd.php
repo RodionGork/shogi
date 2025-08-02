@@ -7,6 +7,7 @@ class RandomShogi {
 	function __construct($cols=6, $rows=6, $position=null) {
 		self::staticInit();
 		$this->maxDepth = 1;
+		$this->maxDepthDrop = 20;
 		if ($position)
 			$this->mkSfenSetup($position);
 		else {
@@ -47,7 +48,7 @@ class RandomShogi {
 	}
 
 	function mkSfenSetup($sfen) {
-		$parts = explode(' ', $sfen);
+		$parts = explode(' ', trim($sfen));
 		$board = str_replace(['+P', '+p'], ['T', 't'], $parts[0]);
 		for ($i = 1; $i <= 9; $i++) {
 			$board = str_replace("$i", str_repeat('-', $i), $board);
@@ -116,19 +117,21 @@ class RandomShogi {
 		$this->searchNodes = 0;
 		$this->deadline = microtime(true) + $millis / 1000;
 		$results = $this->suggest();
-		$depths = [];
+		$mul = 1 - 2 * $this->side;
 		while (microtime(true) < $this->deadline) {
 			$this->maxDepth++;
-		    $this->searchNodes = 0;
+			$this->searchNodes = 0;
 			$resultsNew = $this->suggest()??[];
-			for ($i = 0; $i < count($resultsNew); $i++) {
-				$results[$i] = $resultsNew[$i];
-				$depths[$i] = $this->maxDepth;
-			}
+			$incomplete = count($resultsNew) < count($results);
+			if (!$incomplete)
+				$results = $resultsNew;
+			else
+				for ($i = 0; $i < count($resultsNew); $i++)
+					if ($results[$i][1] * $mul < $resultsNew[$i][1] * $mul)
+						$results[$i] = $resultsNew[$i];
 		}
 		$max = $results[0][1];
-		$mul = 1 - 2 * $this->side;
-		for ($i = 2; $i < count($results); $i++)
+		for ($i = 1; $i < count($results); $i++)
 			if ($results[$i][1] * $mul > $max * $mul)
 				$max = $results[$i][1];
 		$filtered = [];
@@ -147,6 +150,8 @@ class RandomShogi {
 		$mul = 1 - $this->side * 2;
 		$best = -1000000 * $mul;
 		foreach ($ml as $move) {
+			if ($depth > $this->maxDepthDrop && $move[0] == '!')
+				continue;
 			$this->makeMove($move);
 			$val = $this->assess;
 			$checkmate = stristr($move[4], 'K') !== false;
@@ -390,8 +395,8 @@ class RandomShogi {
 			'c' => 3,
 			'y' => 2,
 			'r' => 2,
-			'x' => 3,
-			'v' => 4,
+			'x' => 2,
+			'v' => 5,
 			'h' => 4,
 			'p' => 1,
 			't' => 1,
